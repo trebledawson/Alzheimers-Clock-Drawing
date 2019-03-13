@@ -77,7 +77,7 @@ The two-dimensional neural network is constructed in PyTorch. It consists of an 
 The neural network is trained using cross-entropy loss. The learning rate is optimized using the Adam optimizer with an initial learning rate of 0.001, betas=(0.9, 0.999), and an L2 regularization parameter 0.0005. The learning rate is reduced by a factor of ten after the 25th and 40th epochs. Training is performed over a total of 50 epochs.
 
 ## Results
-Results are reported below. 
+Results are reported below. All networks achieve 100% accuracy on the testing holdout.
 
 ### SCI vs. AMCI
 ![SCI vs. AMCI](https://raw.githubusercontent.com/trebledawson/Alzheimers-Clock-Drawing/master/Results/cnn-2d/12.png)
