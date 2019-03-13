@@ -77,47 +77,6 @@ The two-dimensional neural network is constructed in PyTorch. It consists of an 
 The neural network is trained using cross-entropy loss. The learning rate is optimized using the Adam optimizer with an initial learning rate of 0.001, betas=(0.9, 0.999), and an L2 regularization parameter 0.0005. The learning rate is reduced by a factor of ten after the 25th and 40th epochs. Training is performed over a total of 50 epochs.
 
 ## Results
-Results are reported below. All networks achieve 100% accuracy on the testing holdout.
-
-### SCI vs. AMCI
-![SCI vs. AMCI](https://raw.githubusercontent.com/trebledawson/Alzheimers-Clock-Drawing/master/Results/cnn-2d/12.png)
-Best validation performance on testing holdout: 1.0
-
-### SCI vs. MMCI
-![SCI vs. MMCI](https://raw.githubusercontent.com/trebledawson/Alzheimers-Clock-Drawing/master/Results/cnn-2d/13.png)
-Best validation performance on testing holdout: 1.0
-
-### SCI vs. AD
-![SCI vs. AD](https://raw.githubusercontent.com/trebledawson/Alzheimers-Clock-Drawing/master/Results/cnn-2d/14.png)
-Best validation performance on testing holdout: 1.0
-
-### AMCI vs. MMCI
-![AMCI vs. MMCI](https://raw.githubusercontent.com/trebledawson/Alzheimers-Clock-Drawing/master/Results/cnn-2d/23.png)
-Best validation performance on testing holdout: 1.0
-
-### AMCI vs. AD
-![AMCI vs. AD](https://raw.githubusercontent.com/trebledawson/Alzheimers-Clock-Drawing/master/Results/cnn-2d/24.png)
-Best validation performance on testing holdout: 1.0
-
-### MMCI vs. AD
-![MMCI vs. AD](https://raw.githubusercontent.com/trebledawson/Alzheimers-Clock-Drawing/master/Results/cnn-2d/34.png)
-Best validation performance on testing holdout: 1.0
-
-### SCI vs. AMCI vs. MMCI
-![AMCI vs. MMCI](https://raw.githubusercontent.com/trebledawson/Alzheimers-Clock-Drawing/master/Results/cnn-2d/123.png)
-Best validation performance on testing holdout: 1.0
-
-### AMCI vs. MMCI vs. AD
-![AMCI vs. MMCI vs. AD](https://raw.githubusercontent.com/trebledawson/Alzheimers-Clock-Drawing/master/Results/cnn-2d/234.png)
-Best validation performance on testing holdout: 1.0
-
-### SCI vs. AMCI vs. MMCI vs. AD
-![SCI vs. AMCI vs. MMCI vs. AD](https://raw.githubusercontent.com/trebledawson/Alzheimers-Clock-Drawing/master/Results/cnn-2d/1234.png)
-Best validation performance on testing holdout: 1.0
-
-### SCI vs. AMCI vs. MMCI vs. AD vs. VAD
-![SCI vs. AMCI vs. MMCI vs. AD vs. VAD](https://raw.githubusercontent.com/trebledawson/Alzheimers-Clock-Drawing/master/Results/cnn-2d/12345.png)
-Best validation performance on testing holdout: 1.0
 
 
 
