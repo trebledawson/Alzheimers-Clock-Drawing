@@ -1,22 +1,17 @@
 # ############################################################################# #
-# cnn-2d.py                                                                     #
+# mlp-mrmr.py                                                                   #
 # Author: Glenn Dawson                                                          #
 # --------------------                                                          #
-# This is an experiment to apply a two-dimensional convolutional neural network #
-# to the Alzheimer's disease clock-drawing test dataset from RowanSOM. The      #
-# CombinedV2Filter dataset is used, with each patient's Command and Copy data   #
-# being vertically concatenated. In order to facilitate this concatenation, two #
-# features from the Command dataset are eliminated: The                         #
-# "comm_ClockFaceNonClockFaceNoNoiseLatency" feature and the                    #
-# "CFNonCFNoNoiseTerminator" feature. The concatenated features are then passed #
-# through a two-dimensional ResNet.                                             #
+# This is an experiment to apply a multi-layer perceptron to the Alzheimer's    #
+# disease clock-drawing test dataset from RowanSOM. The CombinedV2Filter        #
+# dataset is used. Features are restricted based on Sean McGuire's MRMR         #
+# feature extraction.                                                           #
 # ############################################################################# #
 
 import os
 import gc
 import warnings
-from datetime import date
-import heapq
+from datetime import date, datetime
 from statistics import mean
 from copy import deepcopy
 import numpy as np
@@ -36,80 +31,116 @@ warnings.filterwarnings(action='ignore', category=DataConversionWarning)
 pd.options.mode.chained_assignment = None
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
+n_features = 100  # 0 < n_features <= 124
+min_epochs = 50
+net_size = 2010
 plot_ = True
+plot_compare_only = True
 savefig_ = True
 savedir = '.\Results\\' + str(date.today())
+
 try:
     os.makedirs(savedir)
 except FileExistsError:
     pass
 
 opt = 'Adam'
-if opt == 'Adam':
+if opt == 'Adam' or 'RMSprop':
     n_epochs = 300
-    n_schedule = [75, 150, 225]
+    n_schedule = [25, 40, 75, 150, 225]
     n_early = 10
 elif opt == 'SGD':
-    n_epochs = 100
-    n_schedule = [30, 60, 80, 90, 95]
-    n_early = 10
+    n_epochs = 1000
+    n_schedule = [500, 700, 800, 900, 950]
+    n_early = 20
+else:
+    raise(ValueError, 'Invalid optimizer. Please choose "Adam", "RMSprop", '
+                      'or "SGD".')
 
 categorical_cols = utils.cat_cols
 
-def main():
-    directory = '.\Data\CombinedV2Filter'
-    files = ['_12', '_13', '_14', '_23', '_24', '_34', '_123', '_234',
-             '_1234', '']
+data_directory = '.\Data\CombinedV2Filter'
+data_files = ['_12', '_13', '_14', '_23', '_24', '_34', '_123',
+              '_234', '_1234', '']
 
+def main():
+    directory = \
+        '.\Data\MRMR\FeaturesAndScoresMRMRAllFeaturesCombined125_'
+    files = ['12Class', '13Class', '14Class', 'MCI_MCI', '24Class', '34Class',
+             '123Class', '234Class', '4Class', '12345Class']
     performance = []
-    for f in files:
-        if f in ['_12', '_13', '_14', '_23', '_24', '_34']:
-            print('Dataset:', f[1:])
-            performance.append(train_model_2_class(directory, f, opt))
-        elif f in ['_123', '_234']:
-            print('Dataset:', f[1:])
-            performance.append(train_model_multiclass(directory, f, 3, opt))
-        elif f == '_1234':
-            print('Dataset:', f[1:])
-            performance.append(train_model_multiclass(directory, f, 4, opt))
+    train_sizes = []
+    test_sizes = []
+    for f, d in zip(files, data_files):
+        if d in ['_12', '_13', '_14', '_23', '_24', '_34']:
+            print('Dataset:', d[1:])
+            p, t, s = train_model_2_class(directory, f, opt, d)
+            performance.append(p)
+            train_sizes.append(t)
+            test_sizes.append(s)
+        elif d in ['_123', '_234']:
+            print('Dataset:', d[1:])
+            p, t, s = train_model_multiclass(directory, f, 3, opt, d)
+            performance.append(p)
+            train_sizes.append(t)
+            test_sizes.append(s)
+        elif d == '_1234':
+            print('Dataset:', d[1:])
+            p, t, s = train_model_multiclass(directory, f, 4, opt, d)
+            performance.append(p)
+            train_sizes.append(t)
+            test_sizes.append(s)
         else:
             print('Dataset: 12345')
-            performance.append(train_model_multiclass(directory, f, 5, opt))
+            p, t, s = train_model_multiclass(directory, f, 5, opt, d)
+            performance.append(p)
+            train_sizes.append(t)
+            test_sizes.append(s)
         print('\n')
 
         gc.collect()
 
-    print('---------------------------------------------')
-    for f, p in zip(files, performance):
-        if f == '':
-            print('Dataset: 12345')
-        else:
-            print('Dataset: ' + f[1:])
+    with open(savedir + '\mlp-mrmr-' + str(n_features) +
+                      '-features\mlp-mrmr.txt', 'w') as log:
+        print('mlp-mrmr experiments |', datetime.today(), file=log)
+        print('n_features =', n_features, file=log)
+        print('min_epochs =', min_epochs, file=log)
+        print('net_size =', net_size, file=log)
+        print('optimizer:', opt, file=log)
+        print('---------------------------------------------', file=log)
+        print('Number of features:', n_features, file=log)
+        print('---------------------------------------------', file=log)
+        for d, p, t, s in zip(data_files, performance, train_sizes, test_sizes):
+            if d == '':
+                print('Dataset: 12345', file=log)
+            else:
+                print('Dataset: ' + d[1:], file=log)
 
-        print('Average of Top 10 Validation Accuracy (Original Dataset)    :',
-              p[0])
-        print('Average of Top 10 Validation Accuracy (SMOTE-NC Before TTS) :',
-              p[1])
-        print('Average of Top 10 Validation Accuracy (SMOTE-NC After TTS)  :',
-              p[2])
-        print('---------------------------------------------')
+            print('Average of Last 10 Validation Accuracy (Original Dataset)    :',
+                  p[0], '| Train / Test size:', t[0], '/', s[0], file=log)
+            print('Average of Last 10 Validation Accuracy (SMOTE-NC Before TTS) :',
+                  p[1], '| Train / Test size:', t[1], '/', s[1], file=log)
+            print('Average of Last 10 Validation Accuracy (SMOTE-NC After TTS)  :',
+                  p[2], '| Train / Test size:', t[2], '/', s[2], file=log)
+            print('---------------------------------------------', file=log)
 
     plt.show()
 
     print('Done.')
 
-def load_data(filepath):
-    data = pd.read_csv(filepath)
-    labels = data.iloc[:, 0]
-    data = data.iloc[:, 1:]
-    data = data.drop(['comm_ClockFaceNonClockFaceNoNoiseLatency',
-                      'CFNonCFNoNoiseTerminator'], axis=1)
 
-    cat_cols_idx = sorted([data.columns.get_loc(c) for c in categorical_cols])
+def load_data(directory, f, d):
+    feature_idx = pd.read_csv(directory + f + '.csv').iloc[:n_features, :]
+    data = pd.read_csv(data_directory + d + '.csv')
+    labels = data.iloc[:, 0]
+    data = data.loc[:, feature_idx.iloc[:, 0]]
+
+    cat_cols = sorted(list(
+        set(feature_idx.iloc[:, 0].values.tolist()) & set(utils.cat_cols)))
+    cat_cols_idx = sorted([data.columns.get_loc(c) for c in cat_cols])
 
     d_train, d_test, y_train, y_test = tts(data, labels,
-                                           test_size=0.3,
-                                           random_state=42)
+                                           test_size=0.3)
     test_idx = list(d_test.index.values)
 
     print('Generating oversampled datasets...')
@@ -137,7 +168,7 @@ def load_data(filepath):
         col = data.columns[i]
         if col in categorical_cols:
             continue
-        
+
         # Original
         d_train[[col]] = scaler.fit_transform(d_train[[col]])
         d_test[[col]] = scaler.transform(d_test[[col]])
@@ -155,62 +186,70 @@ def load_data(filepath):
         d_test_a[[col]] = scaler.transform(d_test_a[[col]])
 
     # Original
-    train_ldr = td.DataLoader(utils.ClockDrawingDataset2D(d_train, y_train),
+    train_ldr = td.DataLoader(utils.ClockDrawingDataset(d_train, y_train),
                               batch_size=10,
                               shuffle=True,
                               num_workers=0)
-    test_ldr = td.DataLoader(utils.ClockDrawingDataset2D(d_test, y_test),
+    test_ldr = td.DataLoader(utils.ClockDrawingDataset(d_test, y_test),
                              batch_size=10,
                              shuffle=False,
                              num_workers=0)
 
     # SMOTE-NC Before
-    train_ldr_b = td.DataLoader(utils.ClockDrawingDataset2D(d_train_b,
+    train_ldr_b = td.DataLoader(utils.ClockDrawingDataset(d_train_b,
                                                             y_train_b),
                                 batch_size=10,
                                 shuffle=True,
                                 num_workers=0)
-    test_ldr_b = td.DataLoader(utils.ClockDrawingDataset2D(d_test_b,
+    test_ldr_b = td.DataLoader(utils.ClockDrawingDataset(d_test_b,
                                                            y_test),
                                batch_size=10,
                                shuffle=False,
                                num_workers=0)
 
     # SMOTE-NC After
-    train_ldr_a = td.DataLoader(utils.ClockDrawingDataset2D(d_train_a,
-                                                           y_train_a),
-                                 batch_size=10,
-                                 shuffle=True,
-                                 num_workers=0)
-    test_ldr_a = td.DataLoader(utils.ClockDrawingDataset2D(d_test_a, y_test),
+    train_ldr_a = td.DataLoader(utils.ClockDrawingDataset(d_train_a,
+                                                            y_train_a),
                                 batch_size=10,
-                                shuffle=False,
+                                shuffle=True,
                                 num_workers=0)
+    test_ldr_a = td.DataLoader(utils.ClockDrawingDataset(d_test_a, y_test),
+                               batch_size=10,
+                               shuffle=False,
+                               num_workers=0)
 
     return [train_ldr, train_ldr_b, train_ldr_a], \
            [test_ldr, test_ldr_b, test_ldr_a]
 
 
-def train_model_2_class(directory, f, opt):
-    filepath = directory + f
+def train_model_2_class(directory, f, opt, d):
     print('Loading data...')
-    train_ldrs, test_ldrs = load_data(filepath + '.csv')
+    train_ldrs, test_ldrs = load_data(directory, f, d)
 
     tr_loss = []
     tr_acc = []
     vl_loss = []
     vl_acc = []
+    train_sizes = []
+    test_sizes = []
     for train_ldr, test_ldr in zip(train_ldrs, test_ldrs):
-        net = utils.Net(2).to(device)
+        train_sizes.append(len(train_ldr.dataset))
+        test_sizes.append(len(test_ldr.dataset))
+        net = utils.SmallNet(2, n_features).to(device)
+        net.size = net_size
+        net.n_filters = net.size
         criterion = nn.BCEWithLogitsLoss()
 
         if opt == 'SGD':
             optimizer = optim.SGD(net.parameters(), lr=0.1, momentum=0.9,
                                   weight_decay=0.0005, nesterov=True)
         elif opt == 'Adam':
-            optimizer = optim.Adam(net.parameters(), lr=0.01,
+            optimizer = optim.Adam(net.parameters(), lr=0.001,
                                    betas=(0.9, 0.999), weight_decay=0.0005,
                                    amsgrad=False)
+        elif opt == 'RMSprop':
+            optimizer = optim.RMSprop(net.parameters(), lr=0.01,
+                                      weight_decay=0.0005, momentum=0.9)
         else:
             raise ValueError('Invalid optimizer selected. Choose \'SGD\' or '
                              '\'Adam\'.')
@@ -218,14 +257,13 @@ def train_model_2_class(directory, f, opt):
                                                    milestones=n_schedule,
                                                    gamma=0.1)
 
-
         print('Training...')
         print('Filters per layer:', net.n_filters)
         print('Criterion:', criterion)
-        print(optimizer)
+        print('Optimizer:', opt)
 
-        losses = [[], [100]]
-        accs = [[], []]
+        losses = [[], []]
+        accs = [[], [0]]
         early_stopping = 0
         for epoch in range(n_epochs):
             # Training
@@ -243,7 +281,7 @@ def train_model_2_class(directory, f, opt):
                 optimizer.zero_grad()
 
                 # Forward + backward + optimize
-                logits = net(local_batch)
+                logits = net(local_batch).view(-1, 1)
                 loss = criterion(logits, local_labels)
                 loss.backward()
                 optimizer.step()
@@ -273,7 +311,7 @@ def train_model_2_class(directory, f, opt):
                                                                dtype=torch.float)
 
                     # Test
-                    logits = net(local_batch)
+                    logits = net(local_batch).view(-1, 1)
                     loss = criterion(logits, local_labels)
 
                     # Tracking
@@ -293,13 +331,13 @@ def train_model_2_class(directory, f, opt):
             accs[0].append(train_acc)
             accs[1].append(val_acc)
 
-            if val_loss >= losses[1][-2]:
+            if val_acc <= accs[1][-2]:
                 early_stopping += 1
             elif early_stopping > 0:
                 early_stopping -= 1
 
             early = False
-            if early_stopping == n_early:
+            if early_stopping >= n_early and epoch > min_epochs:
                 early = True
 
             if epoch % 10 == 9 or early:
@@ -314,43 +352,51 @@ def train_model_2_class(directory, f, opt):
                 print('Early stopping.')
                 break
 
-        losses[1] = losses[1][1:]
+        accs[1] = accs[1][1:]
 
         tr_loss.append(losses[0])
         tr_acc.append(accs[0])
         vl_loss.append(losses[1])
         vl_acc.append(accs[1])
 
-    best = [mean(heapq.nlargest(10, a)) for a in vl_acc]
+    best = [mean(a[-10:]) for a in vl_acc]
     if plot_:
         # Plot loss and accuracy
-        savedir_ = savedir + '\cnn-2d\\' + f[1:] + '\\'
-        plot(savedir_, f, tr_loss, tr_acc, vl_loss, vl_acc, best)
+        savedir_ = savedir + '\mlp-mrmr-' + str(n_features) + '-features\\' + \
+                   d[1:] + '\\'
+        plot(savedir_, d, tr_loss, tr_acc, vl_loss, vl_acc, best)
 
-    return best
+    return best, train_sizes, test_sizes
 
-def train_model_multiclass(directory, f, n_classes, opt):
-    filepath = directory + f
-    if f == '':
-        f = '_12345'
+
+def train_model_multiclass(directory, f, n_classes, opt, d):
     print('Loading data...')
-    train_ldrs, test_ldrs = load_data(filepath + '.csv')
+    train_ldrs, test_ldrs = load_data(directory, f, d)
 
     tr_loss = []
     tr_acc = []
     vl_loss = []
     vl_acc = []
+    train_sizes = []
+    test_sizes = []
     for train_ldr, test_ldr in zip(train_ldrs, test_ldrs):
-        net = utils.Net(n_classes).to(device)
+        train_sizes.append(len(train_ldr.dataset))
+        test_sizes.append(len(test_ldr.dataset))
+        net = utils.SmallNet(n_classes, n_features).to(device)
+        net.size = net_size
+        net.n_filters = net.size
         criterion = nn.CrossEntropyLoss()
 
         if opt == 'SGD':
             optimizer = optim.SGD(net.parameters(), lr=0.1, momentum=0.9,
                                   weight_decay=0.0005, nesterov=True)
         elif opt == 'Adam':
-            optimizer = optim.Adam(net.parameters(), lr=0.01,
+            optimizer = optim.Adam(net.parameters(), lr=0.001,
                                    betas=(0.9, 0.999), weight_decay=0.0005,
                                    amsgrad=False)
+        elif opt == 'RMSprop':
+            optimizer = optim.RMSprop(net.parameters(), lr=0.01,
+                                      weight_decay=0.0005, momentum=0.9)
         else:
             raise ValueError('Invalid optimizer selected. Choose \'SGD\' or '
                              '\'Adam\'.')
@@ -361,10 +407,10 @@ def train_model_multiclass(directory, f, n_classes, opt):
         print('Training...')
         print('Filters per layer:', net.n_filters)
         print('Criterion:', criterion)
-        print(optimizer)
+        print('Optimizer:', opt)
 
-        losses = [[], [100]]
-        accs = [[], []]
+        losses = [[], []]
+        accs = [[], [0]]
         early_stopping = 0
         for epoch in range(n_epochs):
             # Training
@@ -381,7 +427,7 @@ def train_model_multiclass(directory, f, n_classes, opt):
                 optimizer.zero_grad()
 
                 # Forward + backward + optimize
-                logits = net(local_batch)
+                logits = net(local_batch).view(-1, n_classes)
                 loss = criterion(logits, local_labels)
                 loss.backward()
                 optimizer.step()
@@ -407,7 +453,7 @@ def train_model_multiclass(directory, f, n_classes, opt):
                     local_labels = local_labels.to(device)
 
                     # Test
-                    logits = net(local_batch)
+                    logits = net(local_batch).view(-1, n_classes)
                     loss = criterion(logits, local_labels)
 
                     # Tracking
@@ -423,13 +469,13 @@ def train_model_multiclass(directory, f, n_classes, opt):
             accs[0].append(train_acc)
             accs[1].append(val_acc)
 
-            if val_loss >= losses[1][-2]:
+            if val_acc <= accs[1][-2]:
                 early_stopping += 1
             elif early_stopping > 0:
                 early_stopping -= 1
 
             early = False
-            if early_stopping == n_early:
+            if early_stopping >= n_early and epoch > min_epochs:
                 early = True
 
             if epoch % 10 == 9 or early:
@@ -444,22 +490,25 @@ def train_model_multiclass(directory, f, n_classes, opt):
                 print('Early stopping.')
                 break
 
-        losses[1] = losses[1][1:]
+        accs[1] = accs[1][1:]
 
         tr_loss.append(losses[0])
         tr_acc.append(accs[0])
         vl_loss.append(losses[1])
         vl_acc.append(accs[1])
 
-    best = [mean(heapq.nlargest(10, a)) for a in vl_acc]
+    best = [mean(a[-10:]) for a in vl_acc]
     if plot_:
+        if d == '':
+            d = '_12345'
         # Plot loss and accuracy
-        savedir_ = savedir + '\cnn-2d\\' + f[1:] + '\\'
-        plot(savedir_, f, tr_loss, tr_acc, vl_loss, vl_acc, best)
+        savedir_ = savedir + '\mlp-mrmr-' + str(n_features) \
+                   + '-features\\' + d[1:] + '\\'
+        plot(savedir_, d, tr_loss, tr_acc, vl_loss, vl_acc, best)
 
-    return best
+    return best, train_sizes, test_sizes
 
-def plot(savedir_, f, tr_loss, tr_acc, vl_loss, vl_acc, best):
+def plot(savedir_, d, tr_loss, tr_acc, vl_loss, vl_acc, best):
     try:
         os.makedirs(savedir_)
     except FileExistsError:
@@ -507,101 +556,103 @@ def plot(savedir_, f, tr_loss, tr_acc, vl_loss, vl_acc, best):
     plt.grid()
     plt.legend()
 
-    plt.suptitle('2D ConvNet Training History on ' + f[1:] + ' Dataset')
+    plt.suptitle('MLP Training History on ' + d[1:] + ' Dataset')
 
     if savefig_:
         plt.savefig(fname=(savedir_ + '0-compare.pdf'),
                     format='pdf',
                     orientation='landscape')
 
-    plt.figure()
+    if not plot_compare_only:
+        plt.figure()
 
-    plt.subplot(121)
-    plt.title('Original Loss')
-    plt.plot(tr_loss[0], label='Training')
-    plt.plot(vl_loss[0], label='Validation')
-    plt.xlabel('Epoch')
-    plt.ylabel('Loss')
-    plt.grid()
-    plt.legend()
+        plt.subplot(121)
+        plt.title('Original Loss')
+        plt.plot(tr_loss[0], label='Training')
+        plt.plot(vl_loss[0], label='Validation')
+        plt.xlabel('Epoch')
+        plt.ylabel('Loss')
+        plt.grid()
+        plt.legend()
 
-    plt.subplot(122)
-    plt.title('Original Accuracy')
-    plt.plot(tr_acc[0], label='Training')
-    plt.plot(vl_acc[0], label='Validation')
-    plt.axhline(y=best[0], xmin=0, xmax=len(vl_acc[0]), linewidth=0.5, color='r')
-    plt.xlabel('Epoch')
-    plt.ylabel('Accuracy')
-    plt.grid()
-    plt.legend()
+        plt.subplot(122)
+        plt.title('Original Accuracy')
+        plt.plot(tr_acc[0], label='Training')
+        plt.plot(vl_acc[0], label='Validation')
+        plt.axhline(y=best[0], xmin=0, xmax=len(vl_acc[0]), linewidth=0.5, color='r')
+        plt.xlabel('Epoch')
+        plt.ylabel('Accuracy')
+        plt.grid()
+        plt.legend()
 
-    plt.suptitle('2D ConvNet Training History on ' + f[1:] + ' Dataset, '
-                                                             'Original')
+        plt.suptitle('MLP Training History on ' + d[1:] + ' Dataset, '
+                                                                 'Original')
 
-    if savefig_:
-        plt.savefig(fname=(savedir_ + '1-original.pdf'),
-                    format='pdf',
-                    orientation='landscape')
+        if savefig_:
+            plt.savefig(fname=(savedir_ + '1-original.pdf'),
+                        format='pdf',
+                        orientation='landscape')
 
-    plt.figure()
+        plt.figure()
 
-    plt.subplot(121)
-    plt.title('SMOTE-NC (Before TTS) Loss')
-    plt.plot(tr_loss[1], label='Training')
-    plt.plot(vl_loss[1], label='Validation')
-    plt.xlabel('Epoch')
-    plt.ylabel('Loss')
-    plt.grid()
-    plt.legend()
+        plt.subplot(121)
+        plt.title('SMOTE-NC (Before TTS) Loss')
+        plt.plot(tr_loss[1], label='Training')
+        plt.plot(vl_loss[1], label='Validation')
+        plt.xlabel('Epoch')
+        plt.ylabel('Loss')
+        plt.grid()
+        plt.legend()
 
-    plt.subplot(122)
-    plt.title('SMOTE-NC (Before TTS) Accuracy')
-    plt.plot(tr_acc[1], label='Training')
-    plt.plot(vl_acc[1], label='Validation')
-    plt.axhline(y=best[1], xmin=0, xmax=len(vl_acc[1]), linewidth=0.5, color='r')
-    plt.xlabel('Epoch')
-    plt.ylabel('Accuracy')
-    plt.grid()
-    plt.legend()
+        plt.subplot(122)
+        plt.title('SMOTE-NC (Before TTS) Accuracy')
+        plt.plot(tr_acc[1], label='Training')
+        plt.plot(vl_acc[1], label='Validation')
+        plt.axhline(y=best[1], xmin=0, xmax=len(vl_acc[1]), linewidth=0.5, color='r')
+        plt.xlabel('Epoch')
+        plt.ylabel('Accuracy')
+        plt.grid()
+        plt.legend()
 
-    plt.suptitle('2D ConvNet Training History on ' + f[1:] + ' Dataset, '
-                                                             'SMOTE-NC Before '
-                                                             'TTS')
+        plt.suptitle('MLP Training History on ' + d[1:] + ' Dataset, '
+                                                                 'SMOTE-NC Before '
+                                                                 'TTS')
 
-    if savefig_:
-        plt.savefig(fname=(savedir_ + '2-smote-nc-before.pdf'),
-                    format='pdf',
-                    orientation='landscape')
+        if savefig_:
+            plt.savefig(fname=(savedir_ + '2-smote-nc-before.pdf'),
+                        format='pdf',
+                        orientation='landscape')
 
-    plt.figure()
+        plt.figure()
 
-    plt.subplot(121)
-    plt.title('SMOTE-NC (After TTS) Loss')
-    plt.plot(tr_loss[2], label='Training')
-    plt.plot(vl_loss[2], label='Validation')
-    plt.xlabel('Epoch')
-    plt.ylabel('Loss')
-    plt.grid()
-    plt.legend()
+        plt.subplot(121)
+        plt.title('SMOTE-NC (After TTS) Loss')
+        plt.plot(tr_loss[2], label='Training')
+        plt.plot(vl_loss[2], label='Validation')
+        plt.xlabel('Epoch')
+        plt.ylabel('Loss')
+        plt.grid()
+        plt.legend()
 
-    plt.subplot(122)
-    plt.title('SMOTE-NC (After TTS) Accuracy')
-    plt.plot(tr_acc[2], label='Training')
-    plt.plot(vl_acc[2], label='Validation')
-    plt.axhline(y=best[2], xmin=0, xmax=len(vl_acc[2]), linewidth=0.5, color='r')
-    plt.xlabel('Epoch')
-    plt.ylabel('Accuracy')
-    plt.grid()
-    plt.legend()
+        plt.subplot(122)
+        plt.title('SMOTE-NC (After TTS) Accuracy')
+        plt.plot(tr_acc[2], label='Training')
+        plt.plot(vl_acc[2], label='Validation')
+        plt.axhline(y=best[2], xmin=0, xmax=len(vl_acc[2]), linewidth=0.5, color='r')
+        plt.xlabel('Epoch')
+        plt.ylabel('Accuracy')
+        plt.grid()
+        plt.legend()
 
-    plt.suptitle('2D ConvNet Training History on ' + f[1:] + ' Dataset, '
-                                                             'SMOTE-NC After '
-                                                             'TTS')
+        plt.suptitle('MLP Training History on ' + d[1:] + ' Dataset, '
+                                                                 'SMOTE-NC After '
+                                                                 'TTS')
 
-    if savefig_:
-        plt.savefig(fname=(savedir_ + '3-smote-nc-after.pdf'),
-                    format='pdf',
-                    orientation='landscape')
+        if savefig_:
+            plt.savefig(fname=(savedir_ + '3-smote-nc-after.pdf'),
+                        format='pdf',
+                        orientation='landscape')
+
 
 
 if __name__ == '__main__':
